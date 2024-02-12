@@ -42,6 +42,6 @@ terraform.rc
 # Terraform files and directories
 terraform.tfstate.backup
 .terraform/
-terraform.lock.hcl
+.terraform.lock.hcl
 *.tfplan
 
