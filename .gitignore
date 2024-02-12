@@ -32,3 +32,16 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# IntelliJ IDEA files
+.idea/
+
+# Visual Studio Code files
+.vscode/
+
+# Terraform files and directories
+terraform.tfstate.backup
+.terraform/
+terraform.lock.hcl
+*.tfplan
+
