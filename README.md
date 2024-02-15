@@ -2,10 +2,9 @@
 
 Certainly! Below is a template for a `README.md` file that you can adapt for your Terraform project. This README includes an introduction to the enabled API services, an explanation of the code, and instructions on how to run it.
 
-```markdown
-# GCP Networking Infrastructure with Terraform
+## GCP Networking Infrastructure with Terraform
 
-This project contains Terraform code to set up a networking infrastructure in Google Cloud Platform (GCP). It creates a Virtual Private Cloud (VPC) with specific subnets for a web application and a database, without any default routes.
+This project contains Terraform code to set up a networking infrastructure in the Google Cloud Platform (GCP). It creates a Virtual Private Cloud (VPC) with specific subnets for a web application and a database, without any default routes.
 
 ## Prerequisites
 
@@ -72,6 +71,3 @@ Ensure you have authenticated to GCP with the appropriate credentials before run
 Replace the placeholder values in `dev.tfvars` with your actual configuration before running the plan or apply commands.
 
 Always review the plan before applying to avoid unintended changes to your infrastructure.
-```
-
-When using this template, replace the placeholder text with specifics from your project. Make sure to provide any additional instructions or information needed for someone to understand and use your code effectively.
