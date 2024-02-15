@@ -1,6 +1,5 @@
 # tf-gcp-infra
 
-Certainly! Below is a template for a `README.md` file that you can adapt for your Terraform project. This README includes an introduction to the enabled API services, an explanation of the code, and instructions on how to run it.
 
 ## GCP Networking Infrastructure with Terraform
 
