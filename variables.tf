@@ -8,6 +8,11 @@ variable "region" {
   type        = string
 }
 
+variable "vpc_name" {
+  description = "The vpc_name is the name of the vpc."
+  type        = string
+}
+
 variable "webapp_subnet_name" {
   description = "The name of the subnet for the webapp."
   type        = string
