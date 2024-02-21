@@ -36,3 +36,19 @@ variable "db_subnet_cidr" {
   type        = string
   default     = "10.0.2.0/24"
 }
+
+variable "zone" {
+  description = "The zone where resources will be created."
+  type        = string
+}
+
+variable "image_family" {
+  description = "The image_family of the image."
+  type        = string
+}
+
+variable "routing_mode" {
+  description = "Routing mode"
+  type        = string
+  default     = "REGIONAL"
+}
