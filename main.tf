@@ -39,15 +39,17 @@ resource "google_compute_firewall" "allow_app_traffic" {
   }
 
   source_ranges = ["0.0.0.0/0"]
+  priority      = 900
+  direction     = "INGRESS"
 }
 
 resource "google_compute_firewall" "deny_ssh_traffic" {
-  name    = "deny-ssh-traffic"
+  name    = "deny-all-traffic"
   network = google_compute_network.vpc_network.self_link
 
   deny {
-    protocol = "tcp"
-    ports    = ["22"]
+    protocol = "all"
+    ports    = []
   }
 
   source_ranges = ["0.0.0.0/0"]
@@ -99,5 +101,5 @@ resource "google_compute_instance" "webapp_vm" {
     }
   }
 
-  tags = ["allow-app-traffic", "deny-ssh-traffic"]
+  tags = ["allow-app-traffic", "deny-all-traffic"]
 }
