@@ -57,25 +57,11 @@ resource "google_compute_firewall" "deny_ssh_traffic" {
   direction     = "INGRESS"
 }
 
-#resource "google_compute_firewall" "allow_http_traffic" {
-#  name    = "allow-http-traffic"
-#  network = google_compute_network.vpc_network.self_link
-#
-#  allow {
-#    protocol = "tcp"
-#    ports    = ["80"]
-#  }
-#
-#  target_tags = ["allow-http-traffic"]
-#  source_ranges = ["0.0.0.0/0"]
-#}
-
-
 
 # Data Source for Latest Custom Image
 data "google_compute_image" "latest_custom_image" {
   family  = var.image_family
-  project = var.project_id
+  project = var.custom_image_project_id
 }
 
 # Compute Engine Instance

@@ -52,3 +52,9 @@ variable "routing_mode" {
   type        = string
   default     = "REGIONAL"
 }
+
+variable "custom_image_project_id" {
+  description = "The project ID where the custom image is stored"
+  type        = string
+  default     = "cloud-dev-project-414101"
+}
