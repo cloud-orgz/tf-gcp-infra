@@ -53,6 +53,60 @@ variable "routing_mode" {
   default     = "REGIONAL"
 }
 
+variable "cloudsql_instance_name" {
+  type        = string
+  description = "The name of the Cloud SQL instance"
+  default     = "cloudsql-instance-mysql"
+}
+
+variable "cloudsql_database_version" {
+  type        = string
+  description = "The version of the SQL database"
+  default     = "MYSQL_8_0"
+}
+
+variable "cloudsql_region" {
+  type        = string
+  description = "The region of the Cloud SQL instance"
+  default     = "us-central1"
+}
+
+variable "cloudsql_tier" {
+  type        = string
+  description = "The tier of the Cloud SQL instance"
+  default     = "db-custom-1-3840"
+}
+
+variable "cloudsql_disk_type" {
+  type        = string
+  description = "The type of disk used by the Cloud SQL instance"
+  default     = "PD_SSD"
+}
+
+variable "cloudsql_disk_size" {
+  type        = number
+  description = "The size of disk in GB used by the Cloud SQL instance"
+  default     = 100
+}
+
+variable "cloudsql_availability_type" {
+  type        = string
+  description = "The availability type of the Cloud SQL instance"
+  default     = "REGIONAL"
+}
+
+variable "webapp_database_name" {
+  type        = string
+  description = "The name of the webapp database"
+  default     = "webapp"
+}
+
+variable "webapp_user_name" {
+  type        = string
+  description = "The name of the database user for the webapp"
+  default     = "webapp"
+}
+
 variable "custom_image_project_id" {
   description = "The project ID where the custom image is stored"
   type        = string

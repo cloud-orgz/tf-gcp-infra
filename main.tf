@@ -28,6 +28,72 @@ resource "google_compute_route" "webapp_route" {
   next_hop_gateway = "default-internet-gateway"
 }
 
+# Enable Service Networking API
+resource "google_project_service" "service_networking" {
+  service = "servicenetworking.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Reserve IP range for Cloud SQL
+resource "google_compute_global_address" "private_services_access" {
+  name          = "cloudsql-private-services-access"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 24
+  network       = google_compute_network.vpc_network.id
+}
+
+# Create Private Connection for Cloud SQL
+resource "google_service_networking_connection" "private_vpc_connection" {
+  network                 = google_compute_network.vpc_network.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_services_access.name]
+  depends_on              = [google_project_service.service_networking]
+}
+
+resource "google_sql_database_instance" "cloudsql_instance_mysql" {
+  name             = var.cloudsql_instance_name
+  database_version = var.cloudsql_database_version
+  region           = var.cloudsql_region
+  deletion_protection = false
+
+  settings {
+    tier            = var.cloudsql_tier
+    availability_type = var.cloudsql_availability_type
+    disk_type       = var.cloudsql_disk_type
+    disk_size       = var.cloudsql_disk_size
+
+    backup_configuration {
+      enabled = true
+      binary_log_enabled = true
+    }
+
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = google_compute_network.vpc_network.self_link
+    }
+  }
+
+  depends_on = [google_service_networking_connection.private_vpc_connection]
+}
+
+resource "google_sql_database" "webapp_database_mysql" {
+  name     = var.webapp_database_name
+  instance = google_sql_database_instance.cloudsql_instance_mysql.name
+}
+
+# CloudSQL Database User
+resource "random_password" "webapp_user_password" {
+  length  = 16
+  special = true
+}
+
+resource "google_sql_user" "webapp_user_mysql" {
+  name     = var.webapp_user_name
+  instance = google_sql_database_instance.cloudsql_instance_mysql.name
+  password = random_password.webapp_user_password.result
+}
+
 # Firewall Rule
 resource "google_compute_firewall" "allow_app_traffic" {
   name    = "allow-app-traffic"
@@ -36,6 +102,20 @@ resource "google_compute_firewall" "allow_app_traffic" {
   allow {
     protocol = "tcp"
     ports    = ["8080"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  priority      = 900
+  direction     = "INGRESS"
+}
+
+resource "google_compute_firewall" "allow_ssh_traffic" {
+  name    = "allow-shh-traffic"
+  network = google_compute_network.vpc_network.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
   }
 
   source_ranges = ["0.0.0.0/0"]
@@ -87,5 +167,36 @@ resource "google_compute_instance" "webapp_vm" {
     }
   }
 
-  tags = ["allow-app-traffic", "deny-all-traffic"]
+  metadata = {
+    startup-script = <<-EOT
+    #!/bin/bash
+    set -e
+
+    # Path to the environment file
+    ENV_PATH="/opt/webapp/.env"
+
+    # Check if the .env file already exists
+    if [ ! -f "$ENV_PATH" ]; then
+      # Ensure the /opt/webapp directory exists
+      mkdir -p /opt/webapp
+
+      # Write environment variables to /opt/webapp/.env
+      echo "DB_USERNAME=${google_sql_user.webapp_user_mysql.name}" >> $ENV_PATH
+      echo "DB_PASSWORD=${random_password.webapp_user_password.result}" >> $ENV_PATH
+      echo "DB_HOSTNAME=${google_sql_database_instance.cloudsql_instance_mysql.private_ip_address}" >> $ENV_PATH
+      echo "DB_NAME=${google_sql_database.webapp_database_mysql.name}" >> $ENV_PATH
+      sudo chown csye6225:csye6225 $ENV_PATH
+      # Debug: Echo a message to the instance's serial console log
+      echo "Startup script has executed."
+    else
+      echo ".env file already exists, skipping environment setup."
+    fi
+
+    EOT
+  }
+  service_account {
+    scopes = ["cloud-platform"]
+  }
+
+  tags = ["webapp-vm", "allow-app-traffic", "deny-all-traffic", "allow-shh-traffic"]
 }
