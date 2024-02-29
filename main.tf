@@ -109,20 +109,6 @@ resource "google_compute_firewall" "allow_app_traffic" {
   direction     = "INGRESS"
 }
 
-resource "google_compute_firewall" "allow_ssh_traffic" {
-  name    = "allow-shh-traffic"
-  network = google_compute_network.vpc_network.self_link
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22"]
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-  priority      = 900
-  direction     = "INGRESS"
-}
-
 resource "google_compute_firewall" "deny_ssh_traffic" {
   name    = "deny-all-traffic"
   network = google_compute_network.vpc_network.self_link
