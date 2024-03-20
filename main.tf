@@ -85,7 +85,7 @@ resource "google_sql_database" "webapp_database_mysql" {
 # CloudSQL Database User
 resource "random_password" "webapp_user_password" {
   length  = 16
-  special = true
+  special = false
 }
 
 resource "google_sql_user" "webapp_user_mysql" {
@@ -109,6 +109,20 @@ resource "google_compute_firewall" "allow_app_traffic" {
   direction     = "INGRESS"
 }
 
+resource "google_compute_firewall" "allow_ssh_traffic" {
+  name    = "allow-ssh-traffic"
+  network = google_compute_network.vpc_network.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  priority      = 900
+  direction     = "INGRESS"
+}
+
 resource "google_compute_firewall" "deny_ssh_traffic" {
   name    = "deny-all-traffic"
   network = google_compute_network.vpc_network.self_link
@@ -123,6 +137,24 @@ resource "google_compute_firewall" "deny_ssh_traffic" {
   direction     = "INGRESS"
 }
 
+# Service Account for VM
+resource "google_service_account" "webapp_service_account" {
+  account_id   = var.service_account_id
+  display_name = var.service_account_display_name
+}
+
+# IAM Roles Binding to Service Account
+resource "google_project_iam_member" "logging_admin" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_project_iam_member" "monitoring_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
 
 # Data Source for Latest Custom Image
 data "google_compute_image" "latest_custom_image" {
@@ -171,6 +203,7 @@ resource "google_compute_instance" "webapp_vm" {
       echo "DB_PASSWORD=${random_password.webapp_user_password.result}" >> $ENV_PATH
       echo "DB_HOSTNAME=${google_sql_database_instance.cloudsql_instance_mysql.private_ip_address}" >> $ENV_PATH
       echo "DB_NAME=${google_sql_database.webapp_database_mysql.name}" >> $ENV_PATH
+      echo "LOGFILE_PATH=/var/logs/webapp" >> $ENV_PATH
       sudo chown csye6225:csye6225 $ENV_PATH
       # Debug: Echo a message to the instance's serial console log
       echo "Startup script has executed."
@@ -181,8 +214,29 @@ resource "google_compute_instance" "webapp_vm" {
     EOT
   }
   service_account {
-    scopes = ["cloud-platform"]
+    email  = google_service_account.webapp_service_account.email
+    scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 
   tags = ["webapp-vm", "allow-app-traffic", "deny-all-traffic", "allow-shh-traffic"]
+
+  # Explicitly declare dependencies
+  depends_on = [
+    google_project_iam_member.logging_admin,
+    google_project_iam_member.monitoring_metric_writer,
+    google_sql_database_instance.cloudsql_instance_mysql
+  ]
+}
+
+resource "google_dns_record_set" "a_record_webapp" {
+  name         = var.dns_name
+  type         = var.record_type
+  ttl          = var.ttl
+  managed_zone = var.managed_zone
+  project      = var.project_id
+  rrdatas      = [google_compute_instance.webapp_vm.network_interface.0.access_config.0.nat_ip]
+
+  depends_on = [
+    google_compute_instance.webapp_vm
+  ]
 }

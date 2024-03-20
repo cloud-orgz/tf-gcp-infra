@@ -112,3 +112,39 @@ variable "custom_image_project_id" {
   type        = string
   default     = "cloud-dev-project-414101"
 }
+
+variable "record_type" {
+  description = "The type of the DNS record"
+  type        = string
+  default     = "A"
+}
+
+variable "ttl" {
+  description = "The time-to-live for the DNS record (in seconds)"
+  type        = number
+  default     = 300
+}
+
+variable "managed_zone" {
+  description = "The name of the managed DNS zone"
+  type        = string
+  default     = "cloud"
+}
+
+variable "dns_name" {
+  description = "The DNS name for the A record"
+  type        = string
+  default     = "mukulsaipendem.me."
+}
+
+variable "service_account_id" {
+  description = "The ID of the service account for the webapp VM"
+  type        = string
+  default     = "webapp-vm-service-account"
+}
+
+variable "service_account_display_name" {
+  description = "The display name of the service account for the webapp VM"
+  type        = string
+  default     = "WebApp VM Service Account"
+}
