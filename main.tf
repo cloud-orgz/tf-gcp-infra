@@ -109,19 +109,19 @@ resource "google_compute_firewall" "allow_app_traffic" {
   direction     = "INGRESS"
 }
 
-#resource "google_compute_firewall" "allow_ssh_traffic" {
-#  name    = "allow-ssh-traffic"
-#  network = google_compute_network.vpc_network.self_link
-#
-#  allow {
-#    protocol = "tcp"
-#    ports    = ["22"]
-#  }
-#
-#  source_ranges = ["0.0.0.0/0"]
-#  priority      = 900
-#  direction     = "INGRESS"
-#}
+resource "google_compute_firewall" "allow_ssh_traffic" {
+  name    = "allow-ssh-traffic"
+  network = google_compute_network.vpc_network.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  priority      = 900
+  direction     = "INGRESS"
+}
 
 resource "google_compute_firewall" "deny_ssh_traffic" {
   name    = "deny-all-traffic"
@@ -146,7 +146,7 @@ resource "google_service_account" "webapp_service_account" {
 # IAM Roles Binding to Service Account
 resource "google_project_iam_member" "logging_admin" {
   project = var.project_id
-  role    = "roles/logging.logWriter"
+  role    = "roles/logging.admin"
   member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
 }
 
@@ -154,6 +154,46 @@ resource "google_project_iam_member" "monitoring_metric_writer" {
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
   member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_project_iam_member" "storage_viewer" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_pubsub_topic" "verify_email_topic" {
+  name     = var.pubsub_topic_name
+  project  = var.project_id
+}
+
+resource "google_service_account" "publisher_service_account" {
+  account_id   = "publisher-service-account"
+  display_name = "Publisher Service Account"
+  project      = var.project_id
+}
+
+resource "google_project_iam_member" "pubsub_publisher_iam" {
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.publisher_service_account.email}"
+}
+
+resource "google_service_account_key" "publisher_service_account_key" {
+  service_account_id = google_service_account.publisher_service_account.name
+  private_key_type   = "TYPE_GOOGLE_CREDENTIALS_FILE"
+}
+
+resource "google_storage_bucket" "secure_bucket" {
+  name     = "secure-bucket-for-creds"
+  location                    = var.region
+  uniform_bucket_level_access = true
+}
+
+resource "google_storage_bucket_object" "creds_file" {
+  name   = "creds.json"
+  bucket = google_storage_bucket.secure_bucket.name
+  content = base64decode(google_service_account_key.publisher_service_account_key.private_key)
 }
 
 # Data Source for Latest Custom Image
@@ -198,13 +238,19 @@ resource "google_compute_instance" "webapp_vm" {
       # Ensure the /opt/webapp directory exists
       mkdir -p /opt/webapp
 
+      sudo gsutil cp gs://${google_storage_bucket.secure_bucket.name}/creds.json /opt/webapp/creds.json
+
       # Write environment variables to /opt/webapp/.env
       echo "DB_USERNAME=${google_sql_user.webapp_user_mysql.name}" >> $ENV_PATH
       echo "DB_PASSWORD=${random_password.webapp_user_password.result}" >> $ENV_PATH
       echo "DB_HOSTNAME=${google_sql_database_instance.cloudsql_instance_mysql.private_ip_address}" >> $ENV_PATH
       echo "DB_NAME=${google_sql_database.webapp_database_mysql.name}" >> $ENV_PATH
       echo "LOGFILE_PATH=/var/logs/webapp" >> $ENV_PATH
+      echo "GCP_PROJECTID=${var.project_id}" >> $ENV_PATH
+      echo "TOPIC_NAME=${google_pubsub_topic.verify_email_topic.name}" >> $ENV_PATH
+      echo "CREDS_JSON=/opt/webapp/creds.json" >> $ENV_PATH
       sudo chown csye6225:csye6225 $ENV_PATH
+      sudo chown csye6225:csye6225 /opt/webapp/creds.json
       # Debug: Echo a message to the instance's serial console log
       echo "Startup script has executed."
     else
@@ -224,7 +270,10 @@ resource "google_compute_instance" "webapp_vm" {
   depends_on = [
     google_project_iam_member.logging_admin,
     google_project_iam_member.monitoring_metric_writer,
-    google_sql_database_instance.cloudsql_instance_mysql
+    google_sql_database_instance.cloudsql_instance_mysql,
+    google_storage_bucket_object.creds_file,
+    google_project_iam_member.storage_viewer,
+    google_service_account.webapp_service_account
   ]
 }
 
@@ -239,4 +288,80 @@ resource "google_dns_record_set" "a_record_webapp" {
   depends_on = [
     google_compute_instance.webapp_vm
   ]
+}
+
+resource "google_project_service" "vpc_access" {
+  service = "vpcaccess.googleapis.com"
+}
+
+
+resource "google_vpc_access_connector" "vpc_connector" {
+  name          = "my-vpc-connector"
+  project       = var.project_id
+  region        = var.cloudsql_region
+  network       = google_compute_network.vpc_network.name
+  ip_cidr_range = var.vpc_connector_cidr_range
+
+  depends_on = [google_project_service.vpc_access]
+}
+
+
+resource "google_storage_bucket_object" "cloud_zip" {
+  name   = var.cloud_zip_name
+  bucket = google_storage_bucket.secure_bucket.name
+  source = var.cloud_zip_source
+}
+
+resource "google_service_account" "cloud_function_service_account" {
+  account_id   = var.cf_service_account_id
+  display_name = var.cf_service_account_display_name
+}
+
+resource "google_project_iam_member" "cloud_sql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.cloud_function_service_account.email}"
+}
+
+
+resource "google_cloudfunctions2_function" "my_cloud_function_gen2" {
+  name        = "my-cloud-function"
+  description = "Cloud Function with VPC Connector"
+  project     = var.project_id
+
+  build_config {
+    entry_point = var.entry_point
+    runtime     = var.runtime
+    source {
+      storage_source {
+        bucket = google_storage_bucket.secure_bucket.name
+        object = google_storage_bucket_object.cloud_zip.name
+      }
+    }
+  }
+
+  service_config {
+    vpc_connector = google_vpc_access_connector.vpc_connector.id
+    service_account_email = google_service_account.cloud_function_service_account.email
+    environment_variables = {
+      DB_NAME        = google_sql_database.webapp_database_mysql.name
+      DB_USER        = google_sql_user.webapp_user_mysql.name
+      DB_PASS        = random_password.webapp_user_password.result
+      DB_HOST        = google_sql_database_instance.cloudsql_instance_mysql.private_ip_address
+      MAILGUN_API_KEY = var.mailgun_api_key
+      DOMIAN_NAME    = var.domain_name
+      EXPIRE_MIN     = var.expiring_time
+    }
+  }
+
+  event_trigger {
+    event_type = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic = google_pubsub_topic.verify_email_topic.id
+  }
+
+  depends_on = [
+    google_vpc_access_connector.vpc_connector,
+    google_service_networking_connection.private_vpc_connection
+  ]
+  location = var.cloudsql_region
 }
