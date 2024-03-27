@@ -148,3 +148,69 @@ variable "service_account_display_name" {
   type        = string
   default     = "WebApp VM Service Account"
 }
+
+variable "mailgun_api_key" {
+  description = "Mail gun API key"
+  type        = string
+  default     = "31a3b0d0b82fec7c3c2f3e37b3cd1b25-309b0ef4-68022fc7"
+}
+
+variable "domain_name" {
+  description = "The domain name for the A record"
+  type        = string
+  default     = "mukulsaipendem.me"
+}
+
+variable "runtime" {
+  description = "The runtime for the Cloud Function."
+  type        = string
+  default     = "python39"
+}
+
+variable "entry_point" {
+  description = "The entry point to the Cloud Function."
+  type        = string
+  default     = "hello_pubsub"
+}
+
+variable "cloud_zip_name" {
+  description = "The name of the ZIP file in the Cloud Storage bucket."
+  type        = string
+  default     = "serverless-main.zip"
+}
+
+variable "cloud_zip_source" {
+  description = "Local path to the ZIP file to be uploaded to the Cloud Storage bucket."
+  type        = string
+  default     = "C:/Users/pende/Downloads/serverless-main/serverless-main.zip"
+}
+
+variable "cf_service_account_id" {
+  description = "The ID for the Cloud Function service account."
+  type        = string
+  default     = "cloud-function-sa"
+}
+
+variable "cf_service_account_display_name" {
+  description = "The display name for the Cloud Function service account."
+  type        = string
+  default     = "Cloud Function Service Account"
+}
+
+variable "vpc_connector_cidr_range" {
+  description = "The IP CIDR range for the VPC Connector."
+  type        = string
+  default     = "10.169.53.0/28"
+}
+
+variable "pubsub_topic_name" {
+  description = "topic name for pub/sub"
+  type        = string
+  default     = "verify_email"
+}
+
+variable "expiring_time" {
+  description = "expring time for email token"
+  type        = string
+  default     = "2"
+}
