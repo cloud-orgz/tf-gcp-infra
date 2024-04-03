@@ -238,3 +238,9 @@ variable "cpu_utilization_target" {
   type        = number
   default     = 0.05
 }
+
+variable "disk" {
+  description = "VM disk"
+  type        = number
+  default     = 20
+}

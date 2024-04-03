@@ -220,7 +220,7 @@ resource "google_compute_region_instance_template" "webapp_vm_template" {
     auto_delete  = true
     boot         = true
     disk_type    = "pd-balanced"
-    disk_size_gb = 100
+    disk_size_gb = var.disk
   }
 
   network_interface {
