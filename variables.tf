@@ -214,3 +214,27 @@ variable "expiring_time" {
   type        = string
   default     = "2"
 }
+
+variable "network_prefix" {
+  description = "network prefix"
+  type        = string
+  default     = "webapp"
+}
+
+variable "max_replicas" {
+  description = "max_replicas"
+  type        = number
+  default     = 6
+}
+
+variable "min_replicas" {
+  description = "min_replicas"
+  type        = number
+  default     = 3
+}
+
+variable "cpu_utilization_target" {
+  description = "Target CPU utilization percentage"
+  type        = number
+  default     = 0.05
+}
