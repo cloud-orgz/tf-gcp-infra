@@ -95,19 +95,20 @@ resource "google_sql_user" "webapp_user_mysql" {
 }
 
 # Firewall Rule
-resource "google_compute_firewall" "allow_app_traffic" {
-  name    = "allow-app-traffic"
-  network = google_compute_network.vpc_network.self_link
-
-  allow {
-    protocol = "tcp"
-    ports    = ["8080"]
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-  priority      = 900
-  direction     = "INGRESS"
-}
+#resource "google_compute_firewall" "allow_app_traffic" {
+#  name    = "allow-app-traffic"
+#  network = google_compute_network.vpc_network.self_link
+#
+#  allow {
+#    protocol = "tcp"
+#    ports    = ["8080"]
+#  }
+#
+#  source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]
+#  target_tags = ["allow-app-traffic"]
+#  priority      = 900
+#  direction     = "INGRESS"
+#}
 
 resource "google_compute_firewall" "allow_ssh_traffic" {
   name    = "allow-ssh-traffic"
@@ -133,7 +134,7 @@ resource "google_compute_firewall" "deny_ssh_traffic" {
   }
 
   source_ranges = ["0.0.0.0/0"]
-  priority      = 1000
+  priority      = 1100
   direction     = "INGRESS"
 }
 
@@ -159,6 +160,12 @@ resource "google_project_iam_member" "monitoring_metric_writer" {
 resource "google_project_iam_member" "storage_viewer" {
   project = var.project_id
   role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_project_iam_member" "image_readonly" {
+  project = var.custom_image_project_id
+  role    = "roles/compute.imageUser"
   member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
 }
 
@@ -202,18 +209,18 @@ data "google_compute_image" "latest_custom_image" {
   project = var.custom_image_project_id
 }
 
-# Compute Engine Instance
-resource "google_compute_instance" "webapp_vm" {
-  name         = "webapp-vm"
+# Compute Engine Instance Template
+resource "google_compute_region_instance_template" "webapp_vm_template" {
+  name_prefix = "webapp-vm-template-"
   machine_type = "e2-medium"
-  zone         = var.zone
+  region       = var.region
 
-  boot_disk {
-    initialize_params {
-      image = data.google_compute_image.latest_custom_image.self_link
-      type  = "pd-balanced"
-      size  = 100
-    }
+  disk {
+    source_image = data.google_compute_image.latest_custom_image.self_link
+    auto_delete  = true
+    boot         = true
+    disk_type    = "pd-balanced"
+    disk_size_gb = 100
   }
 
   network_interface {
@@ -227,7 +234,7 @@ resource "google_compute_instance" "webapp_vm" {
 
   metadata = {
     startup-script = <<-EOT
-    #!/bin/bash
+        #!/bin/bash
     set -e
 
     # Path to the environment file
@@ -259,22 +266,131 @@ resource "google_compute_instance" "webapp_vm" {
 
     EOT
   }
+
   service_account {
     email  = google_service_account.webapp_service_account.email
     scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 
-  tags = ["webapp-vm", "allow-app-traffic", "deny-all-traffic", "allow-shh-traffic"]
+  tags = ["webapp-vm-template", "allow-app-traffic", "deny-all-traffic", "allow-shh-traffic", "load-balancer"]
+}
 
-  # Explicitly declare dependencies
-  depends_on = [
-    google_project_iam_member.logging_admin,
-    google_project_iam_member.monitoring_metric_writer,
-    google_sql_database_instance.cloudsql_instance_mysql,
-    google_storage_bucket_object.creds_file,
-    google_project_iam_member.storage_viewer,
-    google_service_account.webapp_service_account
+resource "google_compute_region_health_check" "webapp_health_check" {
+  name               = "webapp-health-check"
+  check_interval_sec = 30
+  timeout_sec        = 10
+  healthy_threshold  = 2
+  unhealthy_threshold = 10
+
+  http_health_check {
+    port         = 8080
+    request_path = "/healthz"
+  }
+}
+
+resource "google_compute_region_instance_group_manager" "webapp_regional_manager" {
+  name = "webapp-regional-igm"
+  region = var.region
+  base_instance_name = "webapp-vm"
+  #target_size = 1
+  # Autoscaler configuration
+  version {
+    instance_template = google_compute_region_instance_template.webapp_vm_template.self_link
+
+  }
+
+
+  named_port {
+    name = "http"
+    port = 8080
+  }
+
+  auto_healing_policies {
+    health_check      = google_compute_region_health_check.webapp_health_check.self_link
+    initial_delay_sec = 300
+  }
+
+  # Specify the distribution policy (zones within the region where instances can be created)
+  distribution_policy_zones = [
+    "us-east1-c",
+    "us-east1-b",
+    // Add more zones as needed
   ]
+
+}
+
+# Ensure that the autoscaler targets the regional instance group manager
+resource "google_compute_region_autoscaler" "webapp_regional_autoscaler" {
+  name   = "webapp-regional-autoscaler"
+  region = var.region
+  target = google_compute_region_instance_group_manager.webapp_regional_manager.id
+
+  autoscaling_policy {
+    max_replicas    = var.max_replicas
+    min_replicas    = var.min_replicas
+    cooldown_period = 60
+
+    cpu_utilization {
+      target = 0.05
+    }
+  }
+}
+
+module "gce-lb-https" {
+  source  = "terraform-google-modules/lb-http/google"
+  version = "~> 10.0"
+
+  name    = "${var.network_prefix}-https-lb"
+  project = var.project_id
+  http_forward = false
+  // Assuming your instances are tagged properly to be targeted by the load balancer.
+  target_tags = [
+    "${google_compute_region_instance_template.webapp_vm_template.name_prefix}instance",
+    "load-balancer"
+  ]
+
+  backends = {
+    default = {
+      description                     = "Backend that routes to HTTP port 8080"
+      protocol                        = "HTTP"
+      port                            = 8080  // The service port on your instances
+      port_name                       = "http"  // Must match the name of the named port in your Instance Group
+      timeout_sec                     = 10
+      connection_draining_timeout_sec = 300
+      enable_cdn                      = false
+      health_check = {
+        check_interval_sec  = google_compute_region_health_check.webapp_health_check.check_interval_sec
+        healthy_threshold   = google_compute_region_health_check.webapp_health_check.healthy_threshold
+        timeout_sec         = google_compute_region_health_check.webapp_health_check.timeout_sec
+        unhealthy_threshold = google_compute_region_health_check.webapp_health_check.unhealthy_threshold
+        request_path        = google_compute_region_health_check.webapp_health_check.http_health_check[0].request_path
+        port                = google_compute_region_health_check.webapp_health_check.http_health_check[0].port
+      }
+
+      log_config = {
+        enable      = true
+        sample_rate = 1.0
+      }
+      iap_config = {
+        enable = false
+      }
+
+      groups = [
+        {
+          group = google_compute_region_instance_group_manager.webapp_regional_manager.instance_group
+        },
+      ]
+    }
+  }
+
+  // Google-managed SSL certificate configuration
+  ssl = true
+  managed_ssl_certificate_domains = ["mukulsaipendem.me"]
+
+  // Configure Firewall Rules to allow health check probes
+  firewall_networks = [google_compute_network.vpc_network.name]
+  firewall_projects = [var.project_id]
+
 }
 
 resource "google_dns_record_set" "a_record_webapp" {
@@ -283,12 +399,11 @@ resource "google_dns_record_set" "a_record_webapp" {
   ttl          = var.ttl
   managed_zone = var.managed_zone
   project      = var.project_id
-  rrdatas      = [google_compute_instance.webapp_vm.network_interface.0.access_config.0.nat_ip]
+  rrdatas      = [module.gce-lb-https.external_ip]
 
-  depends_on = [
-    google_compute_instance.webapp_vm
-  ]
+  depends_on = []
 }
+
 
 resource "google_project_service" "vpc_access" {
   service = "vpcaccess.googleapis.com"
