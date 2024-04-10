@@ -28,6 +28,55 @@ resource "google_compute_route" "webapp_route" {
   next_hop_gateway = "default-internet-gateway"
 }
 
+# Service Account for VM
+resource "google_service_account" "webapp_service_account" {
+  account_id   = var.service_account_id
+  display_name = var.service_account_display_name
+}
+
+# IAM Roles Binding to Service Account
+resource "google_project_iam_member" "logging_admin" {
+  project = var.project_id
+  role    = "roles/logging.admin"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_project_iam_member" "monitoring_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_project_iam_member" "storage_viewer" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_project_iam_member" "image_readonly" {
+  project = var.custom_image_project_id
+  role    = "roles/compute.imageUser"
+  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
+}
+
+resource "google_pubsub_topic" "verify_email_topic" {
+  name     = var.pubsub_topic_name
+  project  = var.project_id
+}
+
+resource "google_service_account" "publisher_service_account" {
+  account_id   = "publisher-service-account"
+  display_name = "Publisher Service Account"
+  project      = var.project_id
+}
+
+resource "google_project_iam_member" "pubsub_publisher_iam" {
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.publisher_service_account.email}"
+}
+
+
 # Enable Service Networking API
 resource "google_project_service" "service_networking" {
   service = "servicenetworking.googleapis.com"
@@ -51,12 +100,87 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   depends_on              = [google_project_service.service_networking]
 }
 
+resource "google_kms_key_ring" "new_key_ring" {
+  name     = "key_ring1"
+  location = var.region
+}
+
+resource "google_kms_crypto_key" "vm_cmek" {
+  name       = "vm-cmek"
+  key_ring   = google_kms_key_ring.new_key_ring.id
+  rotation_period = var.rotation_period
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+resource "google_kms_crypto_key" "sql_cmek" {
+  name       = "sql-cmek"
+  key_ring   = google_kms_key_ring.new_key_ring.id
+  rotation_period = var.rotation_period
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+resource "google_kms_crypto_key" "bucket_cmek" {
+  name       = "bucket-cmek"
+  key_ring   = google_kms_key_ring.new_key_ring.id
+  rotation_period = var.rotation_period
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+data "google_storage_project_service_account" "gcs_account" {
+}
+
+resource "google_project_service_identity" "cloudsql_sa" {
+  provider = google-beta
+
+  project = var.project_id
+  service = "sqladmin.googleapis.com"
+}
+
+resource "google_kms_crypto_key_iam_binding" "vm_binding" {
+  crypto_key_id = google_kms_crypto_key.vm_cmek.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+  members = [
+    "serviceAccount:${google_service_account.webapp_service_account.email}",
+    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}",
+    "serviceAccount:${google_project_service_identity.cloudsql_sa.email}"
+  ]
+}
+
+resource "google_kms_crypto_key_iam_binding" "sql_binding" {
+  crypto_key_id = google_kms_crypto_key.sql_cmek.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+  members = [
+    "serviceAccount:${google_service_account.webapp_service_account.email}",
+    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}",
+    "serviceAccount:${google_project_service_identity.cloudsql_sa.email}"
+  ]
+}
+
+resource "google_kms_crypto_key_iam_binding" "bucket_binding" {
+  crypto_key_id = google_kms_crypto_key.bucket_cmek.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+  members = [
+    "serviceAccount:${google_service_account.webapp_service_account.email}",
+    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}",
+    "serviceAccount:${google_project_service_identity.cloudsql_sa.email}"
+  ]
+}
+
 resource "google_sql_database_instance" "cloudsql_instance_mysql" {
   name             = var.cloudsql_instance_name
   database_version = var.cloudsql_database_version
-  region           = var.cloudsql_region
+  region           = var.region
   deletion_protection = false
-
+  encryption_key_name = google_kms_crypto_key.sql_cmek.id
   settings {
     tier            = var.cloudsql_tier
     availability_type = var.cloudsql_availability_type
@@ -73,8 +197,7 @@ resource "google_sql_database_instance" "cloudsql_instance_mysql" {
       private_network = google_compute_network.vpc_network.self_link
     }
   }
-
-  depends_on = [google_service_networking_connection.private_vpc_connection]
+  depends_on = [google_service_networking_connection.private_vpc_connection, google_kms_crypto_key_iam_binding.sql_binding]
 }
 
 resource "google_sql_database" "webapp_database_mysql" {
@@ -138,54 +261,6 @@ resource "google_compute_firewall" "deny_ssh_traffic" {
   direction     = "INGRESS"
 }
 
-# Service Account for VM
-resource "google_service_account" "webapp_service_account" {
-  account_id   = var.service_account_id
-  display_name = var.service_account_display_name
-}
-
-# IAM Roles Binding to Service Account
-resource "google_project_iam_member" "logging_admin" {
-  project = var.project_id
-  role    = "roles/logging.admin"
-  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
-}
-
-resource "google_project_iam_member" "monitoring_metric_writer" {
-  project = var.project_id
-  role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
-}
-
-resource "google_project_iam_member" "storage_viewer" {
-  project = var.project_id
-  role    = "roles/storage.objectViewer"
-  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
-}
-
-resource "google_project_iam_member" "image_readonly" {
-  project = var.custom_image_project_id
-  role    = "roles/compute.imageUser"
-  member  = "serviceAccount:${google_service_account.webapp_service_account.email}"
-}
-
-resource "google_pubsub_topic" "verify_email_topic" {
-  name     = var.pubsub_topic_name
-  project  = var.project_id
-}
-
-resource "google_service_account" "publisher_service_account" {
-  account_id   = "publisher-service-account"
-  display_name = "Publisher Service Account"
-  project      = var.project_id
-}
-
-resource "google_project_iam_member" "pubsub_publisher_iam" {
-  project = var.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:${google_service_account.publisher_service_account.email}"
-}
-
 resource "google_service_account_key" "publisher_service_account_key" {
   service_account_id = google_service_account.publisher_service_account.name
   private_key_type   = "TYPE_GOOGLE_CREDENTIALS_FILE"
@@ -195,6 +270,10 @@ resource "google_storage_bucket" "secure_bucket" {
   name     = "secure-bucket-for-creds"
   location                    = var.region
   uniform_bucket_level_access = true
+  encryption {
+    default_kms_key_name = google_kms_crypto_key.bucket_cmek.id
+  }
+  depends_on  = [ google_kms_crypto_key_iam_binding.bucket_binding ]
 }
 
 resource "google_storage_bucket_object" "creds_file" {
@@ -212,7 +291,7 @@ data "google_compute_image" "latest_custom_image" {
 # Compute Engine Instance Template
 resource "google_compute_region_instance_template" "webapp_vm_template" {
   name_prefix = "webapp-vm-template-"
-  machine_type = "e2-medium"
+  machine_type = var.machine_type
   region       = var.region
 
   disk {
@@ -221,6 +300,13 @@ resource "google_compute_region_instance_template" "webapp_vm_template" {
     boot         = true
     disk_type    = "pd-balanced"
     disk_size_gb = var.disk
+    disk_encryption_key {
+      kms_key_self_link = google_kms_crypto_key.vm_cmek.id
+    }
+    source_image_encryption_key {
+      kms_key_self_link = google_kms_crypto_key.vm_cmek.id
+    }
+
   }
 
   network_interface {
@@ -413,7 +499,7 @@ resource "google_project_service" "vpc_access" {
 resource "google_vpc_access_connector" "vpc_connector" {
   name          = "my-vpc-connector"
   project       = var.project_id
-  region        = var.cloudsql_region
+  region        = var.region
   network       = google_compute_network.vpc_network.name
   ip_cidr_range = var.vpc_connector_cidr_range
 
@@ -478,5 +564,5 @@ resource "google_cloudfunctions2_function" "my_cloud_function_gen2" {
     google_vpc_access_connector.vpc_connector,
     google_service_networking_connection.private_vpc_connection
   ]
-  location = var.cloudsql_region
+  location = var.region
 }

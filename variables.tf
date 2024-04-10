@@ -244,3 +244,15 @@ variable "disk" {
   type        = number
   default     = 20
 }
+
+variable "rotation_period" {
+  description = "rotation_period"
+  type        = string
+  default     = "2592000s"
+}
+
+variable "machine_type" {
+  description = "machine type"
+  type        = string
+  default     = "e2-standard-2"
+}
