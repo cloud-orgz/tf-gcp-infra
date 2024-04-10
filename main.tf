@@ -132,10 +132,10 @@ resource "google_kms_crypto_key" "bucket_cmek" {
   }
 }
 
-data "google_storage_project_service_account" "gcs_account" {
+data "google_storage_project_service_account" "storage_account" {
 }
 
-resource "google_project_service_identity" "cloudsql_sa" {
+resource "google_project_service_identity" "cloudsql_account" {
   provider = google-beta
 
   project = var.project_id
@@ -148,8 +148,8 @@ resource "google_kms_crypto_key_iam_binding" "vm_binding" {
 
   members = [
     "serviceAccount:${google_service_account.webapp_service_account.email}",
-    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}",
-    "serviceAccount:${google_project_service_identity.cloudsql_sa.email}"
+    "serviceAccount:${data.google_storage_project_service_account.storage_account.email_address}",
+    "serviceAccount:${google_project_service_identity.cloudsql_account.email}"
   ]
 }
 
@@ -159,8 +159,8 @@ resource "google_kms_crypto_key_iam_binding" "sql_binding" {
 
   members = [
     "serviceAccount:${google_service_account.webapp_service_account.email}",
-    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}",
-    "serviceAccount:${google_project_service_identity.cloudsql_sa.email}"
+    "serviceAccount:${data.google_storage_project_service_account.storage_account.email_address}",
+    "serviceAccount:${google_project_service_identity.cloudsql_account.email}"
   ]
 }
 
@@ -170,8 +170,8 @@ resource "google_kms_crypto_key_iam_binding" "bucket_binding" {
 
   members = [
     "serviceAccount:${google_service_account.webapp_service_account.email}",
-    "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}",
-    "serviceAccount:${google_project_service_identity.cloudsql_sa.email}"
+    "serviceAccount:${data.google_storage_project_service_account.storage_account.email_address}",
+    "serviceAccount:${google_project_service_identity.cloudsql_account.email}"
   ]
 }
 
