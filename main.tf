@@ -101,7 +101,7 @@ resource "google_service_networking_connection" "private_vpc_connection" {
 }
 
 resource "google_kms_key_ring" "new_key_ring" {
-  name     = "key_ring1"
+  name     = var.ring_name
   location = var.region
 }
 
